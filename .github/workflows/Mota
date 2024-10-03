@@ -1,0 +1,88 @@
+name: Kernel Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set build date
+        run: |
+          export TZ='Asia/Jakarta'
+          echo "BUILD_DATE=$(date +'%Y%m%d')" >> $GITHUB_ENV
+
+      - name: Setup environment variables
+        run: |
+          echo "ANYKERNEL_SOURCE=https://github.com/yourrepo/AnyKernel3" >> $GITHUB_ENV
+          echo "ANYKERNEL_SOURCE_BRANCH=your-branch" >> $GITHUB_ENV
+          echo "KERNEL_SOURCE=https://github.com/MotorolaMobilityLLC/kernel-mtk" >> $GITHUB_ENV
+          echo "KERNEL_SOURCE_BRANCH=android-12-release-s3rwds32.123-29-2-2" >> $GITHUB_ENV
+          echo "KERNEL_TARGET=k79v1_64_defconfig" >> $GITHUB_ENV
+          echo "BUILD_ARGS=ARCH=arm64 O=../out" >> $GITHUB_ENV
+
+      - name: Pull toolchain
+        run: |
+          # Clone GCC toolchain
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 aarch64-linux-android-4.9
+          
+          # Pull the Clang toolchain
+          mkdir clang && curl https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android14-release/clang-r487747c.tar.gz -RLO
+          tar -C clang/ -xf clang-*.tar.gz
+
+      - name: Pull kernel source
+        run: |
+          git clone --depth=1 ${{ env.KERNEL_SOURCE }} -b ${{ env.KERNEL_SOURCE_BRANCH }} kernel-source
+
+      - name: Build kernel
+        run: |
+          # Set up environment for Clang build
+          export KBUILD_BUILD_USER="github_user"
+          export KBUILD_BUILD_HOST="githubworkflow"
+          export PATH=$GITHUB_WORKSPACE/clang/bin:${PATH}
+
+          # Build args
+          args="ARCH=arm64 \
+                O=../out \
+                CLANG_TRIPLE=aarch64-linux-gnu- \
+                CROSS_COMPILE=$GITHUB_WORKSPACE/aarch64-linux-android-4.9/bin/aarch64-linux-android-"
+
+          # Go into the kernel source directory
+          cd kernel-source
+
+          # Set defconfig
+          make $args ${{ env.KERNEL_TARGET }}
+
+          # Start compiling with all available cores
+          make -j$(nproc) $args
+
+      - name: Package kernel
+        run: |
+          # Clone AnyKernel3 repository
+          git clone --depth=1 ${{ env.ANYKERNEL_SOURCE }} -b ${{ env.ANYKERNEL_SOURCE_BRANCH }} AnyKernel3
+          rm -rf AnyKernel3/.git AnyKernel3/.github AnyKernel3/LICENSE AnyKernel3/README.md
+          
+          # Copy the built kernel to AnyKernel3 directory
+          if [[ -f out/arch/arm64/boot/Image.gz-dtb ]]; then
+            cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
+          elif [[ -f out/arch/arm64/boot/Image-dtb ]]; then
+            cp out/arch/arm64/boot/Image-dtb AnyKernel3/Image-dtb
+          elif [[ -f out/arch/arm64/boot/Image.gz ]]; then
+            cp out/arch/arm64/boot/Image.gz AnyKernel3/Image.gz
+          elif [[ -f out/arch/arm64/boot/Image ]]; then
+            cp out/arch/arm64/boot/Image AnyKernel3/Image
+          fi
+          
+          # Copy DTBO if available
+          if [[ -f out/arch/arm64/boot/dtbo.img ]]; then
+            cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
+          fi
+
+      - name: Upload kernel to artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-${{ env.BUILD_DATE }}
+          path: AnyKernel3/*
