@@ -7,6 +7,8 @@ on:
   pull_request:
     branches:
       - main
+  # This allows you to trigger the workflow manually from the GitHub UI
+  workflow_dispatch:
 
 jobs:
   build:
@@ -49,21 +51,3 @@ jobs:
         make ARCH=arm64 O=out mrproper
         mv defconfig arch/arm64/configs/custom_defconfig
         make ARCH=arm64 O=out custom_defconfig
-
-    # 7. Build the kernel
-    - name: Build the kernel
-      run: |
-        make -j$(nproc) ARCH=arm64 O=out \
-          CC=clang \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
-
-    # 8. Package boot.img (assumes you're building a boot image)
-    - name: Package boot.img
-      run: |
-        cp out/arch/arm64/boot/Image.gz-dtb ./  # Adjust this based on your kernel output structure
-        # Replace with the script you use to pack the boot.img if necessary
-        mkbootimg --kernel Image.gz-dtb --ramdisk ramdisk.img --cmdline 'console=ttyS0,115200n8' --output boot.img
-
-    #
