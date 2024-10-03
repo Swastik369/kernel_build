@@ -1,0 +1,69 @@
+name: KernelSU Build for Moto G31
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build Kernel with KernelSU
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Checkout the kernel source
+    - name: Checkout kernel source
+      uses: actions/checkout@v3
+
+    # 2. Set up build environment (install dependencies)
+    - name: Set up build environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential bc curl libncurses5-dev libssl-dev git wget ccache flex bison \
+                                clang lld libelf-dev libfdt-dev libzstd-dev
+
+    # 3. Download the defconfig file
+    - name: Download defconfig
+      run: |
+        wget -O defconfig https://file.io/ZgXfCU6JAaOc
+
+    # 4. Download KernelSU source and apply it to the kernel
+    - name: Clone KernelSU source
+      run: |
+        git clone https://github.com/tiann/KernelSU.git
+        cp -r KernelSU/* .  # Apply KernelSU to your kernel source (adjust based on your repo structure)
+
+    # 5. Set up the Clang toolchain
+    - name: Set up toolchain
+      run: |
+        git clone https://github.com/kdrag0n/proton-clang.git clang
+        export PATH="$PWD/clang/bin:$PATH"
+
+    # 6. Configure the kernel with the downloaded defconfig
+    - name: Configure kernel
+      run: |
+        make ARCH=arm64 O=out clean
+        make ARCH=arm64 O=out mrproper
+        mv defconfig arch/arm64/configs/custom_defconfig
+        make ARCH=arm64 O=out custom_defconfig
+
+    # 7. Build the kernel
+    - name: Build the kernel
+      run: |
+        make -j$(nproc) ARCH=arm64 O=out \
+          CC=clang \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+
+    # 8. Package boot.img (assumes you're building a boot image)
+    - name: Package boot.img
+      run: |
+        cp out/arch/arm64/boot/Image.gz-dtb ./  # Adjust this based on your kernel output structure
+        # Replace with the script you use to pack the boot.img if necessary
+        mkbootimg --kernel Image.gz-dtb --ramdisk ramdisk.img --cmdline 'console=ttyS0,115200n8' --output boot.img
+
+    #
