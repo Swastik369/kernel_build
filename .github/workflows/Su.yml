@@ -1,4 +1,4 @@
-name: KernelSU Build for Moto G31
+name: KernelSU Build for Moto G31 (Optimized)
 
 on:
   push:
@@ -7,47 +7,83 @@ on:
   pull_request:
     branches:
       - main
-  # This allows you to trigger the workflow manually from the GitHub UI
   workflow_dispatch:
 
 jobs:
   build:
     name: Build Kernel with KernelSU
     runs-on: ubuntu-latest
+    timeout-minutes: 60  # Limit build time to avoid exceeding free tier limits
 
     steps:
-    # 1. Checkout the kernel source
-    - name: Checkout kernel source
-      uses: actions/checkout@v3
+    # 1. Clone the kernel source from Motorola's repository and checkout the specific tag
+    - name: Clone kernel source
+      run: |
+        git clone https://github.com/MotorolaMobilityLLC/kernel-mtk.git kernel
+        cd kernel
+        git checkout MMI-S3RWBS32.125-29-2-4-3  # Checking out the specified tag
 
-    # 2. Set up build environment (install dependencies)
+    # 2. Set up build environment (install minimal dependencies)
     - name: Set up build environment
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential bc curl libncurses5-dev libssl-dev git wget ccache flex bison \
-                                clang lld libelf-dev libfdt-dev libzstd-dev
+        sudo apt-get install -y build-essential bc libncurses5-dev libssl-dev wget ccache \
+                                clang lld libelf-dev libfdt-dev
 
-    # 3. Download the defconfig file
+    # 3. Use caching for toolchain and dependencies (Clang)
+    - name: Cache Clang Toolchain
+      uses: actions/cache@v3
+      with:
+        path: clang
+        key: ${{ runner.os }}-clang-proton
+        restore-keys: |
+          ${{ runner.os }}-clang-
+
+    - name: Clone and set up Proton Clang toolchain
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        git clone https://github.com/kdrag0n/proton-clang.git clang
+
+    # 4. Download the defconfig file
     - name: Download defconfig
       run: |
         wget -O defconfig https://file.io/ZgXfCU6JAaOc
 
-    # 4. Download KernelSU source and apply it to the kernel
+    # 5. Download KernelSU source and apply it to the kernel
     - name: Clone KernelSU source
       run: |
         git clone https://github.com/tiann/KernelSU.git
-        cp -r KernelSU/* .  # Apply KernelSU to your kernel source (adjust based on your repo structure)
-
-    # 5. Set up the Clang toolchain
-    - name: Set up toolchain
-      run: |
-        git clone https://github.com/kdrag0n/proton-clang.git clang
-        export PATH="$PWD/clang/bin:$PATH"
+        cp -r KernelSU/* ./kernel  # Apply KernelSU to your kernel source
 
     # 6. Configure the kernel with the downloaded defconfig
     - name: Configure kernel
       run: |
+        cd kernel
         make ARCH=arm64 O=out clean
         make ARCH=arm64 O=out mrproper
-        mv defconfig arch/arm64/configs/custom_defconfig
+        mv ../defconfig arch/arm64/configs/custom_defconfig
         make ARCH=arm64 O=out custom_defconfig
+
+    # 7. Build the kernel (parallel build limited to avoid excessive resource use)
+    - name: Build the kernel
+      run: |
+        cd kernel
+        make -j$(nproc) ARCH=arm64 O=out \
+          CC=clang \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+
+    # 8. Package boot.img (only if necessary to reduce output size)
+    - name: Package boot.img
+      run: |
+        cd kernel
+        cp out/arch/arm64/boot/Image.gz-dtb ../
+        mkbootimg --kernel Image.gz-dtb --ramdisk ramdisk.img --cmdline 'console=ttyS0,115200n8' --output boot.img
+
+    # 9. Upload boot.img only (optimize storage usage)
+    - name: Upload boot.img
+      uses: actions/upload-artifact@v3
+      with:
+        name: boot-img
+        path: ./boot.img
