@@ -1,4 +1,4 @@
-name: KernelSU Build for Moto G31 (Optimized)
+name: KernelSU Build for Moto G31 (Optimized - Skip Clean Step)
 
 on:
   push:
@@ -47,7 +47,7 @@ jobs:
     # 4. Download the defconfig file
     - name: Download defconfig
       run: |
-        wget -O defconfig https://file.io/yOmCIYShM0Oh
+        wget -O defconfig https://file.io/ZgXfCU6JAaOc
 
     # 5. Download KernelSU source and apply it to the kernel
     - name: Clone KernelSU source
@@ -55,12 +55,13 @@ jobs:
         git clone https://github.com/tiann/KernelSU.git
         cp -r KernelSU/* ./kernel  # Apply KernelSU to your kernel source
 
-    # 6. Configure the kernel with the downloaded defconfig
-    - name: Configure kernel
+    # 6. Configure the kernel (skip clean step)
+    - name: Configure kernel (skip clean)
       run: |
         cd kernel
-        make ARCH=arm64 O=out clean
-        make ARCH=arm64 O=out mrproper
+        # Clean step skipped to avoid the issue
+        # make ARCH=arm64 O=out clean
+        # make ARCH=arm64 O=out mrproper
         mv ../defconfig arch/arm64/configs/custom_defconfig
         make ARCH=arm64 O=out custom_defconfig
 
@@ -74,14 +75,26 @@ jobs:
           CROSS_COMPILE=aarch64-linux-gnu- \
           CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
 
-    # 8. Package boot.img (only if necessary to reduce output size)
+    # 8. Download the stock boot.img
+    - name: Download stock boot.img
+      run: |
+        wget -O stock_boot.img https://file.io/p6vAgpwMSX6J
+
+    # 9. Extract the ramdisk from stock boot.img
+    - name: Extract ramdisk
+      run: |
+        mkdir ramdisk
+        unpackbootimg -i stock_boot.img -o extracted  # Unpack the boot.img
+        gzip -dc extracted/boot.img-ramdisk.gz | cpio -idmv -D ./ramdisk  # Extract ramdisk
+
+    # 10. Package the final boot.img using the new kernel and stock ramdisk
     - name: Package boot.img
       run: |
         cd kernel
         cp out/arch/arm64/boot/Image.gz-dtb ../
-        mkbootimg --kernel Image.gz-dtb --ramdisk ramdisk.img --cmdline 'console=ttyS0,115200n8' --output boot.img
+        mkbootimg --kernel Image.gz-dtb --ramdisk ./ramdisk --cmdline 'console=ttyS0,115200n8' --output boot.img
 
-    # 9. Upload boot.img only (optimize storage usage)
+    # 11. Upload boot.img only (optimize storage usage)
     - name: Upload boot.img
       uses: actions/upload-artifact@v3
       with:
