@@ -47,7 +47,7 @@ jobs:
     # 4. Download the defconfig file
     - name: Download defconfig
       run: |
-        wget -O defconfig https://file.io/ZgXfCU6JAaOc
+        wget -O defconfig https://file.io/uScKQc1ynDSY
 
     # 5. Download KernelSU source and apply it to the kernel
     - name: Clone KernelSU source
