@@ -1,0 +1,64 @@
+name: Build KernelSU
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_defconfig:
+        description: 'Enter the kernel defconfig (e.g., your_device_defconfig)'
+        required: true
+        default: 'defconfig'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      KERNEL_REPO: https://github.com/MotorolaMobilityLLC/kernel-mtk.git
+      KERNEL_BRANCH: MMI-S3RWBS32.125-29-2-4-3
+      CROSS_COMPILE: aarch64-linux-gnu-
+      ARCH: arm64
+      BOOT_IMG_URL: https://file.io/9JYjOz3JEaxf
+      DEFCONFIG_URL: https://file.io/u77mvYNsPSS7
+
+    steps:
+    - name: Set up build environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc make clang libncurses-dev bison flex libssl-dev bc ccache curl zip rsync build-essential git
+
+    - name: Clone Kernel Source
+      run: |
+        git clone ${{ env.KERNEL_REPO }} --branch ${{ env.KERNEL_BRANCH }} --depth=1 kernel-source
+      working-directory: ${{ github.workspace }}
+
+    - name: Clone KernelSU Repository
+      run: |
+        git clone https://github.com/tiann/KernelSU.git KernelSU
+
+    - name: Download Boot Image
+      run: |
+        curl -L ${{ env.BOOT_IMG_URL }} --output boot.img
+
+    - name: Download Defconfig
+      run: |
+        curl -L ${{ env.DEFCONFIG_URL }} --output kernel-source/arch/arm64/configs/${{ github.event.inputs.kernel_defconfig }}
+
+    - name: Apply KernelSU Patches
+      run: |
+        bash KernelSU/tools/ksu_patch.sh kernel-source
+
+    - name: Make Defconfig
+      run: |
+        cd kernel-source
+        make O=out ARCH=${{ env.ARCH }} ${{ github.event.inputs.kernel_defconfig }}
+
+    - name: Build Kernel
+      run: |
+        cd kernel-source
+        make -j$(nproc) O=out ARCH=${{ env.ARCH }} CROSS_COMPILE=${{ env.CROSS_COMPILE }} CC=clang
+
+    - name: Upload Kernel Image
+      uses: actions/upload-artifact@v3
+      with:
+        name: KernelSU-Image
+        path: kernel-source/out/arch/arm64/boot/Image.gz-dtb
